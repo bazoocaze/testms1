@@ -1,5 +1,7 @@
 # Experiment: Moving Maven Repository Configuration from `pom.xml` to a Centralized Composite Action
 
+> Para navegação automatizada, veja a seção [Repositórios e Arquivos Relevantes](#reposit%C3%B3rios-e-arquivos-relevantes) no final deste documento.
+
 ## Goal
 
 Keep the `pom.xml` clean by removing the `<repositories>` section (which points to a private/external Maven repository) and instead place that configuration in a reusable, centralized way. The experiment evolved through three stages:
@@ -141,3 +143,57 @@ This pattern is useful when:
 - You want to keep `pom.xml` clean and free of CI-specific or environment-specific repository declarations.
 - You have multiple Maven projects consuming packages from GitHub Packages (or any private Maven registry).
 - You want to centralize CI setup logic in a reusable composite action.
+
+---
+
+## Repositórios e Arquivos Relevantes
+
+Links para que um agente (ou pessoa) possa buscar toda a informação necessária:
+
+### Repositórios no GitHub
+
+| Repositório | URL | Descrição |
+|---|---|---|
+| `bazoocaze/github-actions` | https://github.com/bazoocaze/github-actions | Centraliza a composite action `maven-setup` |
+| `bazoocaze/testlib1` | https://github.com/bazoocaze/testlib1 | Biblioteca Maven publicada no GitHub Packages |
+| `bazoocaze/testms1` | https://github.com/bazoocaze/testms1 | Microserviço que **consome** `testlib1` do GitHub Packages |
+| `bazoocaze/testlib2` | https://github.com/bazoocaze/testlib2 | Segunda biblioteca (mesmo padrão) |
+
+### Arquivos-Chave (locais — caminhos relativos à raiz do monorepo)
+
+| Arquivo | Descrição |
+|---|---|
+| `github-actions/maven-setup/action.yml` | **Composite action** que gera `settings.xml` + setup JDK |
+| `github-actions/README.md` | Documentação de uso da action |
+| `testms1/.github/workflows/build.yml` | Workflow do testms1 usando a action |
+| `testms1/pom.xml` | POM do testms1 **sem** `<repositories>` (depende da action) |
+| `testlib1/.github/workflows/build-deploy.yml` | Workflow do testlib1 (build + deploy para GitHub Packages) |
+| `testlib1/pom.xml` | POM do testlib1 (biblioteca publicada) |
+| `testlib2/.github/workflows/build-deploy.yml` | Workflow do testlib2 |
+| `testlib2/pom.xml` | POM do testlib2 |
+| `CHECKPOINT.md` | Resumo do experimento com links para os pacotes publicados |
+
+### Composite action `maven-setup`
+
+**Path local:** `github-actions/maven-setup/action.yml`
+**Uso em workflows:** `bazoocaze/github-actions/maven-setup@v1`
+
+A action:
+1. Gera `~/.m2/settings.xml` com servidor, profile e activeProfile
+2. Executa `actions/setup-java@v4` com `overwrite-settings: false`
+
+Inputs:
+- `java-version` (default `"21"`)
+- `java-distribution` (default `"temurin"`)
+- `github-owner` (default `"bazoocaze"`)
+- `server-id` (default `"github"`)
+
+### Pacotes publicados no GitHub Packages
+
+- `com.github.bazoocaze.lib:testlib1:1.0-SNAPSHOT` — https://github.com/bazoocaze/testlib1/packages/3146122
+
+### Documentação externa
+
+- [Composite Actions — GitHub Docs](https://docs.github.com/en/actions/creating-actions/creating-a-composite-action)
+- [`actions/setup-java`](https://github.com/actions/setup-java)
+- [GitHub Packages — Maven](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-apache-maven-registry)
