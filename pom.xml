@@ -47,6 +47,14 @@
     </dependency>
   </dependencies>
 
+  <repositories>
+    <repository>
+      <id>github</id>
+      <name>GitHub Packages</name>
+      <url>https://maven.pkg.github.com/bazoocaze/testlib1</url>
+    </repository>
+  </repositories>
+
   <build>
     <pluginManagement><!-- lock down plugins versions to avoid using Maven defaults (may be moved to parent pom) -->
       <plugins>
