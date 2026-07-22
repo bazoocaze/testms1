@@ -1,12 +1,16 @@
-# Experiment: Moving Maven Repository Configuration from `pom.xml` to a Versioned `settings.xml` in CI
+# Experiment: Moving Maven Repository Configuration from `pom.xml` to a Centralized Composite Action
 
 ## Goal
 
-Keep the `pom.xml` clean by removing the `<repositories>` section (which points to a private/external Maven repository) and instead place that configuration inside a versioned `settings.xml` file that lives alongside the CI workflow.
+Keep the `pom.xml` clean by removing the `<repositories>` section (which points to a private/external Maven repository) and instead place that configuration in a reusable, centralized way. The experiment evolved through three stages:
+
+1. **Stage 1**: Versioned `settings.xml` inside each project's `.github/workflows/`
+2. **Stage 2**: Versioned `settings.xml` removed — `settings.xml` generated dynamically by a centralized composite action
+3. **Final**: A reusable composite action (`bazoocaze/github-actions/maven-setup@v1`) that any project can use
 
 ## Hypothesis
 
-The `actions/setup-java` GitHub Action only configures Maven **authentication** (server credentials) in `~/.m2/settings.xml`. It does **not** provide any input to define custom Maven repository URLs. Therefore, the repository URL must be declared somewhere Maven can read it. We can place it in a `settings.xml` file committed to the repository and copied into `~/.m2/` during the CI run.
+The `actions/setup-java` GitHub Action only configures Maven **authentication** (server credentials) in `~/.m2/settings.xml`. It does **not** provide any input to define custom Maven repository URLs. Therefore, the repository URL must be declared somewhere Maven can read it.
 
 ## Setup
 
@@ -26,36 +30,81 @@ The `pom.xml` contained a `<repositories>` block:
 
 > **Note the wildcard `*` at the end of the URL.** GitHub Packages supports a wildcard pattern where `https://maven.pkg.github.com/OWNER/*` acts as a single catch-all repository URL for all packages published by that GitHub owner (user or organization). Without this wildcard, you would need to declare one `<repository>` per package — e.g., `https://maven.pkg.github.com/OWNER/PACKAGE_NAME` for each library you consume. The wildcard drastically simplifies configuration when consuming multiple packages from the same owner.
 
-### After
+### Stage 1: Versioned `settings.xml` per project
 
-1. **`pom.xml`** — No `<repositories>` section. The file is cleaner and contains only project metadata, dependencies, and build plugins.
+Each project had a `.github/workflows/settings.xml` copied manually into `~/.m2/` during CI.
 
-2. **`.github/workflows/settings.xml`** — A versioned Maven `settings.xml` file placed alongside the workflow definition. It contains:
-   - The `<server>` block with authentication credentials (using environment variables).
-   - A `<profile>` with the `<repository>` definition.
-   - An `<activeProfile>` to activate the profile automatically.
+### Stage 2 (Final): Centralized composite action
 
-3. **`.github/workflows/build.yml`** — The CI workflow:
-   - Copies the versioned `settings.xml` into `~/.m2/settings.xml` **before** `setup-java` runs.
-   - Sets `overwrite-settings: false` on `setup-java` so it does not overwrite our custom `settings.xml`.
-   - Uses `server-id: github` so `setup-java` can still inject the `GITHUB_TOKEN` into the server credentials.
-   - **Critically, the `GITHUB_TOKEN` environment variable must be explicitly passed to every Maven step** (both `compile` and `deploy`) via `env:` so that `${env.GITHUB_TOKEN}` in `settings.xml` resolves correctly. Without it, Maven will fail with a 401 Unauthorized when trying to download dependencies from GitHub Packages.
+A dedicated repository (`bazoocaze/github-actions`) hosts a [composite action](https://docs.github.com/en/actions/creating-actions/creating-a-composite-action) that:
+
+1. **Generates** `~/.m2/settings.xml` dynamically with:
+   - The `<server>` block with authentication (using `${env.GITHUB_ACTOR}` and `${env.GITHUB_TOKEN}`).
+   - A `<profile>` with the `<repository>` definition using the wildcard URL.
+   - An `<activeProfile>` to activate it automatically.
+2. **Sets up JDK** via `actions/setup-java` with `overwrite-settings: false`.
+
+The action is published at `bazoocaze/github-actions/maven-setup@v1` and accepts inputs:
+- `java-version` (default `"21"`)
+- `java-distribution` (default `"temurin"`)
+- `github-owner` (default `"bazoocaze"`)
+- `server-id` (default `"github"`)
+
+Usage in any project:
+
+```yaml
+steps:
+  - uses: actions/checkout@v4
+
+  - uses: bazoocaze/github-actions/maven-setup@v1
+    with:
+      java-version: "21"
+      github-owner: "bazoocaze"
+
+  - name: Build with Maven
+    run: mvn -B compile --file pom.xml
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+## Pitfalls Encountered
+
+### 1. `GITHUB_TOKEN` must be passed explicitly to every Maven step
+
+The `setup-java` action writes the server block into `settings.xml` referencing `${env.GITHUB_TOKEN}`, but it does **not** make the token available to subsequent steps. You must pass it manually:
+
+```yaml
+- name: Build with Maven
+  run: mvn -B compile --file pom.xml
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+Failing to do so results in a `401 Unauthorized` error when Maven tries to resolve dependencies from GitHub Packages.
+
+### 2. `overwrite-settings: false`
+
+When using a custom `settings.xml` (whether versioned or generated), you must set `overwrite-settings: false` on `setup-java` to prevent it from overwriting your file.
+
+### 3. Cross-repository package access
+
+`GITHUB_TOKEN` is scoped to the current repository. If your project depends on a package published by **another** repository (even under the same owner), the token may not have access. In that case, use a Personal Access Token (PAT) with `read:packages` scope and pass it as a secret (e.g., `GH_TOKEN`).
 
 ## Result
 
-✅ The build succeeded. Maven resolved the dependency from the external repository using the repository URL defined in the versioned `settings.xml`, without needing a `<repositories>` block in `pom.xml`.
+✅ All three projects (`testlib1`, `testms1`, `testlib2`) build successfully using the centralized composite action, with no `<repositories>` in `pom.xml` and no per-project `settings.xml`.
 
 ## Key Takeaways
 
 - `actions/setup-java` only manages authentication (`settings.xml` servers), **not** repository URLs.
-- A versioned `settings.xml` can be kept in `.github/workflows/` (or any path in the repo) and copied into `~/.m2/` during CI.
-- `overwrite-settings: false` is essential to prevent `setup-java` from clobbering the custom `settings.xml`.
-- **The `GITHUB_TOKEN` (or `GH_TOKEN`/PAT) environment variable must be passed to every Maven step** that needs to authenticate against GitHub Packages. The `setup-java` action only writes the server block into `settings.xml` — it does not make the token available to subsequent steps unless you explicitly pass it via `env:`.
-- This approach keeps `pom.xml` portable and free of CI-specific repository configuration.
+- A centralized composite action eliminates boilerplate across multiple Maven projects.
+- **The `GITHUB_TOKEN` environment variable must be passed to every Maven step** that needs to authenticate against GitHub Packages.
+- The wildcard URL `https://maven.pkg.github.com/OWNER/*` allows consuming all packages from an owner with a single repository declaration.
+- For cross-repository package access, consider using a PAT instead of `GITHUB_TOKEN`.
 
 ## Developer Workstation Setup
 
-On a local machine, the developer still needs a `~/.m2/settings.xml` with both the repository URL and authentication. The versioned `settings.xml` in `.github/workflows/` is **not** used locally — it is CI-only. Instead, the developer maintains a personal `~/.m2/settings.xml` that looks like this:
+On a local machine, the developer still needs a `~/.m2/settings.xml` with both the repository URL and authentication. The composite action is CI-only. The developer maintains a personal `~/.m2/settings.xml`:
 
 ```xml
 <settings>
@@ -83,16 +132,12 @@ On a local machine, the developer still needs a `~/.m2/settings.xml` with both t
 </settings>
 ```
 
-> **Important:** The developer's `~/.m2/settings.xml` is **personal and never committed to the repository**. It contains the developer's own GitHub token with at least `read:packages` scope. The token is obtained from GitHub Settings → Developer settings → Personal access tokens → Fine-grained tokens (or classic). The `OWNER` in the URL is replaced with the actual GitHub owner (user or organization) that publishes the packages.
-
-### Why not use the versioned `settings.xml` locally?
-
-The versioned `settings.xml` uses `${env.GITHUB_ACTOR}` and `${env.GITHUB_TOKEN}` — environment variables that only exist in the GitHub Actions runner. These variables are not available on a local machine, so the file would not work as-is. Additionally, committing a token or any credential to the repository is a security risk.
+> **Important:** The developer's `~/.m2/settings.xml` is **personal and never committed to the repository**. It contains the developer's own GitHub token with at least `read:packages` scope. The `OWNER` in the URL is replaced with the actual GitHub owner.
 
 ## Applicability
 
 This pattern is useful when:
 
 - You want to keep `pom.xml` clean and free of CI-specific or environment-specific repository declarations.
-- You consume Maven packages from GitHub Packages, GitLab Packages, or any private Maven registry that requires both authentication and a custom repository URL.
-- You want the repository configuration to be version-controlled alongside the CI workflow rather than embedded in the project metadata.
+- You have multiple Maven projects consuming packages from GitHub Packages (or any private Maven registry).
+- You want to centralize CI setup logic in a reusable composite action.
