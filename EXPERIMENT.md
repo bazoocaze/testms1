@@ -98,6 +98,17 @@ When using a custom `settings.xml` (whether versioned or generated), you must se
 
 Additionally, `testms1` now consumes both `testlib1` and `testlib2`, forming a dependency chain: **testms1 → testlib2 → testlib1**. This validates that the wildcard repository URL (`https://maven.pkg.github.com/OWNER/*`) correctly resolves transitive dependencies across multiple packages from the same GitHub owner.
 
+### Local build validation (developer workstation)
+
+To confirm that the developer's `~/.m2/settings.xml` is sufficient (no per-project `settings.xml` and no `pom.xml` `<repositories>`), the local Maven cache was cleared and the build was run from scratch:
+
+```bash
+rm -rf ~/.m2/repository/com/github/bazoocaze
+cd testms1 && mvn -B clean compile
+```
+
+Maven successfully downloaded both `testlib1` and `testlib2` (and their transitive dependencies) directly from GitHub Packages, using only the `~/.m2/settings.xml` with the `<profile>` containing the wildcard repository URL and the `<activeProfile>` to activate it. No artifacts were cached beforehand.
+
 ## Key Takeaways
 
 - `actions/setup-java` only manages authentication (`settings.xml` servers), **not** repository URLs.
@@ -108,7 +119,18 @@ Additionally, `testms1` now consumes both `testlib1` and `testlib2`, forming a d
 
 ## Developer Workstation Setup
 
-On a local machine, the developer still needs a `~/.m2/settings.xml` with both the repository URL and authentication. The composite action is CI-only. The developer maintains a personal `~/.m2/settings.xml`:
+On a local machine, the developer still needs a `~/.m2/settings.xml` with both the repository URL and authentication. The composite action is CI-only. The developer maintains a personal `~/.m2/settings.xml`.
+
+### Required structure
+
+The `settings.xml` must contain three things:
+1. **`<server>`** — authentication credentials (username + PAT/github_token)
+2. **`<profile>`** — repository URL with the wildcard pattern
+3. **`<activeProfile>`** — to activate the profile automatically
+
+Without the `<profile>` and `<activeProfile>`, Maven will not know where to look for the dependencies, even if the server credentials are present.
+
+### Example
 
 ```xml
 <settings>
@@ -192,7 +214,8 @@ Inputs:
 
 ### Pacotes publicados no GitHub Packages
 
-- `com.github.bazoocaze.lib:testlib1:1.0-SNAPSHOT` — https://github.com/bazoocaze/testlib1/packages/3146122
+- `com.github.bazoocaze.lib:testlib1:1.1-SNAPSHOT` — https://github.com/bazoocaze/testlib1/packages/3146122
+- `com.github.bazoocaze.lib:testlib2:1.0-SNAPSHOT` — https://github.com/bazoocaze/testlib2/packages/
 
 ### Documentação externa
 
