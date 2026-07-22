@@ -96,6 +96,8 @@ When using a custom `settings.xml` (whether versioned or generated), you must se
 
 ✅ All three projects (`testlib1`, `testms1`, `testlib2`) build successfully using the centralized composite action, with no `<repositories>` in `pom.xml` and no per-project `settings.xml`.
 
+Additionally, `testms1` now consumes both `testlib1` and `testlib2`, forming a dependency chain: **testms1 → testlib2 → testlib1**. This validates that the wildcard repository URL (`https://maven.pkg.github.com/OWNER/*`) correctly resolves transitive dependencies across multiple packages from the same GitHub owner.
+
 ## Key Takeaways
 
 - `actions/setup-java` only manages authentication (`settings.xml` servers), **not** repository URLs.
@@ -156,8 +158,8 @@ Links para que um agente (ou pessoa) possa buscar toda a informação necessári
 |---|---|---|
 | `bazoocaze/github-actions` | https://github.com/bazoocaze/github-actions | Centraliza a composite action `maven-setup` |
 | `bazoocaze/testlib1` | https://github.com/bazoocaze/testlib1 | Biblioteca Maven publicada no GitHub Packages |
-| `bazoocaze/testms1` | https://github.com/bazoocaze/testms1 | Microserviço que **consome** `testlib1` do GitHub Packages |
-| `bazoocaze/testlib2` | https://github.com/bazoocaze/testlib2 | Segunda biblioteca (mesmo padrão) |
+| `bazoocaze/testms1` | https://github.com/bazoocaze/testms1 | Microserviço que **consome** `testlib1` e `testlib2` do GitHub Packages |
+| `bazoocaze/testlib2` | https://github.com/bazoocaze/testlib2 | Segunda biblioteca — **depende de** `testlib1` e expõe `App2.getFullAnswer()` |
 
 ### Arquivos-Chave (locais — caminhos relativos à raiz do monorepo)
 
