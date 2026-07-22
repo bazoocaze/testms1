@@ -38,7 +38,8 @@ The `pom.xml` contained a `<repositories>` block:
 3. **`.github/workflows/build.yml`** — The CI workflow:
    - Copies the versioned `settings.xml` into `~/.m2/settings.xml` **before** `setup-java` runs.
    - Sets `overwrite-settings: false` on `setup-java` so it does not overwrite our custom `settings.xml`.
-   - Uses `server-id: github` so `setup-java` can still inject the `GITHUB_TOKEN` into the server credentials (though the token is also passed via `GITHUB_TOKEN` environment variable).
+   - Uses `server-id: github` so `setup-java` can still inject the `GITHUB_TOKEN` into the server credentials.
+   - **Critically, the `GITHUB_TOKEN` environment variable must be explicitly passed to every Maven step** (both `compile` and `deploy`) via `env:` so that `${env.GITHUB_TOKEN}` in `settings.xml` resolves correctly. Without it, Maven will fail with a 401 Unauthorized when trying to download dependencies from GitHub Packages.
 
 ## Result
 
@@ -49,6 +50,7 @@ The `pom.xml` contained a `<repositories>` block:
 - `actions/setup-java` only manages authentication (`settings.xml` servers), **not** repository URLs.
 - A versioned `settings.xml` can be kept in `.github/workflows/` (or any path in the repo) and copied into `~/.m2/` during CI.
 - `overwrite-settings: false` is essential to prevent `setup-java` from clobbering the custom `settings.xml`.
+- **The `GITHUB_TOKEN` (or `GH_TOKEN`/PAT) environment variable must be passed to every Maven step** that needs to authenticate against GitHub Packages. The `setup-java` action only writes the server block into `settings.xml` — it does not make the token available to subsequent steps unless you explicitly pass it via `env:`.
 - This approach keeps `pom.xml` portable and free of CI-specific repository configuration.
 
 ## Developer Workstation Setup
